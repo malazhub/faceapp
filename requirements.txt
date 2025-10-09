@@ -12,4 +12,6 @@ gunicorn
 
 #pyautogui
 
+requests
+beautifulsoup4
 
