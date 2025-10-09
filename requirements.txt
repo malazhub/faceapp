@@ -1,13 +1,15 @@
 ﻿flask
 openai
-rembg
+#rembg
 Pillow
 opencv-python-headless
-sentence-transformers
-playwright
+#sentence-transformers
+#playwright
 pytesseract
 gunicorn
 
 
+
+#pyautogui
 
 
