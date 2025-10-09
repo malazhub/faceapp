@@ -7,6 +7,7 @@ sentence-transformers
 playwright
 pytesseract
 gunicorn
-pyautogui
+
+
 
 
