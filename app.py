@@ -16,7 +16,7 @@ import time
 import cv2
 import numpy as np
 from sentence_transformers import SentenceTransformer, util
-import pyautogui
+#import pyautogui
 
 
 #from PIL import ImageChops
