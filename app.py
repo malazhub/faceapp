@@ -4,31 +4,21 @@ from flask import Flask, render_template_string, request
 from playwright.sync_api import sync_playwright, Page
 
 import base64 
-import pytesseract
+#import pytesseract
 #import requests
-from io import BytesIO
 import re
 import threading
-import webbrowser
+#import webbrowser
 
-import torch
 import time
-import cv2
-import numpy as np
-from sentence_transformers import SentenceTransformer, util
 #import pyautogui
 
 
 #from PIL import ImageChops
 # استبدال النموذج السابق بنموذج قوي للمطابقة المعنوية
-transformer_model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
-
-from PIL import Image
 from datetime import datetime
 import os
-from rembg import remove
 
-import imagehash
 
 from playwright.sync_api import sync_playwright
 
@@ -39,73 +29,15 @@ import json
 
 
 
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+#pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
+def take_screenshot(page):
+    page.wait_for_timeout(500)   # نصف ثانية انتظار
+    return page.screenshot(full_page=False)
 
 
 
    
-def extract_text_with_boxes(image):
-    if image is None:
-        print("🚫 فشل تحميل الصورة (image is None)")
-        return []
-
-    try:
-        # تحويل الصورة إلى RGB
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-        # استخراج بيانات النص مع مواقع الصناديق
-        data = pytesseract.image_to_data(image_rgb, lang='eng+ara', output_type=pytesseract.Output.DICT)
-
-        all_texts = []
-        grouped_blocks = []  # ← قائمة مضافة: لتجميع البلوكات النصية
-
-        current_block_num = -1
-        current_block_text = []
-
-        # المرور على كل كلمة في البيانات
-        for i in range(len(data['level'])):
-            block_num = data['block_num'][i]
-            text = data['text'][i].strip()
-
-            # تخطي النص الفارغ
-            if not text:
-                continue
-
-            if block_num != current_block_num:
-                if current_block_text:
-                    block_text = ' '.join(current_block_text)
-                    all_texts.append(block_text)
-                    grouped_blocks.append(current_block_text.copy())  # ← أضف البلوك كقائمة
-                current_block_text = [text]
-                current_block_num = block_num
-            else:
-                current_block_text.append(text)
-
-        if current_block_text:
-            block_text = ' '.join(current_block_text)
-            all_texts.append(block_text)
-            grouped_blocks.append(current_block_text.copy())  # ← أضف آخر بلوك
-
-        print(f"📦 عدد الكتل النصية المكتشفة: {len(all_texts)}")
-
-        # يمكنك هنا إعادة الاثنين معًا، أو الاحتفاظ بـ grouped_blocks للاستخدام الخارجي
-        # return all_texts, grouped_blocks ← في حال أردت الإثنين معًا
-        return all_texts, grouped_blocks
-  # ← إذا أردت فقط all_texts كما هو ظاهر
-
-    except Exception as e:
-        print("❗ خطأ أثناء تحليل الصورة:", e)
-        return []
-
-
-
-    except Exception as e:
-        print(f"❗ خطأ أثناء تحليل الصورة: {e}")
-        return []
-
-
-
 def extract_and_match_posts(all_texts, keywords, similarity_threshold):
     results = []
 
@@ -183,75 +115,6 @@ app = Flask(__name__)
 
 
 
-def screenshots_are_similar(img_bytes1, img_bytes2, threshold=0.98):
-    # تحويل البايتات إلى صور PIL
-    img1 = Image.open(BytesIO(img_bytes1)).convert("RGB")
-    img2 = Image.open(BytesIO(img_bytes2)).convert("RGB")
-
-    # حساب الـ perceptual hash لكلا الصورتين
-    hash1 = imagehash.phash(img1)
-    hash2 = imagehash.phash(img2)
-
-    # حساب الفرق بين الهاشات
-    diff = hash1 - hash2
-    hash_size = len(hash1.hash)**2  # عدد البتات في الهاش (عادة 64)
-    
-    similarity = 1 - (diff / hash_size)
-
-    #print("🔍 pHash similarity:", similarity)
-    #input("اضغط للمتابعة...")
-
-    return similarity >= threshold
-
-
-
-def apply_mask_to_image(image_bytes, mask):
-    # تحويل الصورة من bytes إلى NumPy array بصيغة BGR (لـ OpenCV)
-    image_stream = BytesIO(image_bytes)
-    pil_image = Image.open(image_stream).convert("RGB")
-    image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
-
-    # التأكد أن أبعاد الصورة متوافقة مع القناع
-    if image.shape[:2] != mask.shape:
-        mask = cv2.resize(mask, (image.shape[1], image.shape[0]))
-
-    # إنشاء خلفية بيضاء
-    background = np.ones_like(image, dtype=np.uint8) * 255
-
-    # تحويل القناع إلى ثلاث قنوات
-    if len(mask.shape) == 2:
-        mask_3ch = cv2.merge([mask, mask, mask])
-    else:
-        mask_3ch = mask
-
-    # تطبيق القناع
-    foreground = cv2.bitwise_and(image, mask_3ch)
-    background_masked = cv2.bitwise_and(background, cv2.bitwise_not(mask_3ch))
-    final = cv2.add(foreground, background_masked)
-
-    return final
-
-
-
-def remove_background_with_rembg(image_bytes):
-    # فتح الصورة من Bytes وتحويلها إلى RGB
-    input_image = Image.open(BytesIO(image_bytes)).convert("RGB")
-    
-    # إزالة الخلفية
-    output_image = remove(input_image)
-
-    # تحويل النتيجة إلى مصفوفة NumPy
-    output_np = np.array(output_image)
-
-    # استخراج قناة Alpha كقناع أبيض وأسود
-    if output_np.shape[2] == 4:
-        mask = output_np[:, :, 3]
-    else:
-        mask = np.ones(output_np.shape[:2], dtype=np.uint8) * 255
-
-    return mask
-
-
 def is_keyword_match(keyword, text):
     if keyword in text:
         return 1.0  # تطابق تام
@@ -260,21 +123,31 @@ def is_keyword_match(keyword, text):
 
 
 def compute_similarity(text1, text2, threshold=0.6):
-    # تقسيم text2 إلى جمل أو مقاطع فرعية
-    
-    chunks = re.split(r'[.؟!\n]', text2)
-    chunks = [chunk.strip() for chunk in chunks if chunk.strip()]
+    """Lightweight lexical similarity without loading a machine-learning runtime."""
+    import difflib
+    import unicodedata
 
-    # تضمين النصوص (text1 + كل أجزاء text2)
-    texts = [text1] + chunks
-    embeddings = transformer_model.encode(texts, convert_to_tensor=True)
+    def tokens(value):
+        normalized = unicodedata.normalize("NFKC", str(value or "")).casefold()
+        normalized = "".join(
+            char for char in normalized
+            if unicodedata.category(char) != "Mn"
+        )
+        return re.findall(r"\w+", normalized)
 
-    # حساب التشابه بين text1 وكل جزء من text2
-    similarities = util.pytorch_cos_sim(embeddings[0], embeddings[1:])
-    max_similarity = similarities.max().item()
+    query = tokens(text1)
+    words = tokens(text2)
+    if not query or not words:
+        return 0.0
+    available = set(words)
+    scores = []
+    for word in set(query):
+        scores.append(1.0 if word in available else max(
+            (difflib.SequenceMatcher(None, word, other).ratio() for other in available),
+            default=0.0
+        ))
+    return sum(scores) / len(scores)
 
-    #print("...max similarity with parts of text2......", max_similarity)
-    return max_similarity
 
 def save_cookies(context, email):
     cookies = context.cookies()
@@ -283,7 +156,8 @@ def save_cookies(context, email):
         return
     cookie_json = json.dumps(cookies)
     try:
-        conn = sqlite3.connect("sessions.db")
+        conn = sqlite3.connect("/tmp/sessions.db")
+
         conn.execute("""
             CREATE TABLE IF NOT EXISTS cookies (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -301,7 +175,8 @@ def save_cookies(context, email):
 
 def load_cookies(context, email):
     try:
-        conn = sqlite3.connect("sessions.db")
+        conn = sqlite3.connect("/tmp/sessions.db")
+
         conn.execute("""
             CREATE TABLE IF NOT EXISTS cookies (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -331,135 +206,22 @@ def get_dom_snapshot(page):
     
 
 
-def preprocess_image_for_ocr(image):
-    # 1. تحويل الصورة إلى رمادية
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-    # 2. زيادة التباين باستخدام CLAHE
-    clahe = cv2.createCLAHE(clipLimit=5.0, tileGridSize=(8,8))
-    enhanced = clahe.apply(gray)
-
-    # 3. تطبيق Threshold ذكي (Adaptive Threshold) لتحويل النص إلى أسود والخلفية إلى أبيض
-    thresh = cv2.adaptiveThreshold(
-        enhanced, 255, 
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-        cv2.THRESH_BINARY,21 , 10
-    )
-
-    # 4. ع
-    processed = thresh
-
-    return processed
-
-
-import asyncio
-
-
 def expand_all_facebook_posts(page):
-    try:
-        # 1. التقاط سكرين شوت من الصفحة (Full page screenshot غير مدعوم على الهاتف، نأخذ الصورة المعروضة فقط)
-        #input("i will screen shot")
-        screenshot_bytes = page.screenshot(full_page=False)
-        image_stream = BytesIO(screenshot_bytes)
-        pil_image = Image.open(image_stream).convert("RGB")
-
-        # 2. تحويل الصورة إلى numpy array لـ OpenCV
-        image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
-
-        # ثم طبق زيادة التباين (مثلاً دالة preprocess_image_for_ocr التي ذكرتها لك)
-        image = preprocess_image_for_ocr(image)
-
-        # 3. استخدم pytesseract لاستخراج بيانات النصوص مع مواقع الكلمات
-        data = pytesseract.image_to_data(image, lang='eng+ara', output_type=pytesseract.Output.DICT)
-        print("📃 النصوص المكتشفة داخل الصورة:")
-        for word in data['text']:
-            print(word, end=' ')
-
-
-        #input("i am expand")
-        # 4. ابحث عن الكلمات "see more" أو "عرض المزيد" مع موقعها (مربع النص)
-        targets = []
-
-        # التحقق من كل كلمة والكلمة التي تليها مرة واحدة فقط
-        i = 0
-        while i < len(data['text']):
-            word = data['text'][i].lower().strip()
-            next_word = data['text'][i + 1].lower().strip() if i + 1 < len(data['text']) else ""
-
-            # تطابق مباشر
-            if word in ["see more", "عرض المزيد"]:
-                x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
-                center_x = x + w // 2
-                center_y = y + h // 2
-                targets.append((center_x, center_y))
-                print(f"✅ Found target '{word}' (single) at: ({center_x}, {center_y})")
-                break
-
-            # تطابق من كلمتين متتاليتين
-            elif (word == "see" and next_word == "more") or (word == "عرض" and next_word == "المزيد"):
-                # نضغط فقط على الكلمة الثانية: "more" أو "المزيد"
-                x = data['left'][i + 1]
-                y = data['top'][i + 1]
-                w = data['width'][i + 1]
-                h = data['height'][i + 1]
-                center_x = x + w // 2
-                center_y = y + h // 2
-                targets.append((center_x, center_y))
-                print(f"✅ Found target '{word} {next_word}' (clicking on '{next_word}') at: ({center_x}, {center_y})")
-                break
-
-
-            i += 1
-
-
-        print("targets........")
-        # 5. إذا لم تجد أهداف، ارجع بعد تأخير
-        if not targets:
-            time.sleep(2)
-            return False
-
-        # 6. إذا وجدت، انقر على كل هدف مع فاصل 2 ثانية
-        # قبل الحلقة التي تنقر فيها أضف هذه السطور لتحصل على أبعاد الصورة ونافذة المتصفح:
-        img_width, img_height = pil_image.size
-        viewport = page.viewport_size
-        vp_width, vp_height = viewport['width'], viewport['height']
-
-        
-
-        for (x_img, y_img) in targets:
-                device_scale_factor = page.evaluate("window.devicePixelRatio")
-
-                x_page = int(x_img * vp_width / img_width / device_scale_factor) + 3
-                y_page = int(y_img * vp_height / img_height / device_scale_factor) + 3
-
-                print(f"Clicking at: ({x_page}, {y_page})")
+    """Expand visible Facebook posts using DOM text controls instead of OCR."""
+    changed = False
+    for label in ("See more", "عرض المزيد"):
+        try:
+            controls = page.get_by_text(label, exact=True)
+            for index in range(min(controls.count(), 12)):
                 try:
-                    print(f"👆 محاولة الضغط باستخدام الماوس في ({x_page}, {y_page})")
-                    page.mouse.move(x_page, y_page)
-                    time.sleep(0.1)
-                    page.mouse.click(x_page, y_page)
-                    time.sleep(2)
-                except Exception as e:
-                    print(f"⚠️ فشل النقر بالماوس — تجربة JavaScript: {e}")
-                    page.evaluate(f"""
-                        () => {{
-                            const el = document.elementFromPoint({x_page}, {y_page});
-                            if (el) el.click();
-                        }}
-                    """)
-
-                print("Clicked")
-
-
-
-        # 7. فاصل 2 ثانية قبل الرجوع
-        time.sleep(2)
-        return True
-
-    except Exception as e:
-        print(f"❌ خطأ في expand_all_facebook_posts: {e}")
-        return False
-
+                    controls.nth(index).click(timeout=1200)
+                    changed = True
+                    page.wait_for_timeout(150)
+                except Exception:
+                    continue
+        except Exception as exc:
+            print(f"Could not expand '{label}': {exc}")
+    return changed
 
 
 def smart_scroll_mobile(page):
@@ -569,149 +331,97 @@ def scroll_up_and_return_smoothly(page):
 
 
 def analyze_posts_via_screenshot_ai(page: Page, keywords, max_posts, max_scrolls, similarity_threshold):
+    """Analyze post text in the DOM and capture screenshots for matched posts."""
+    results = []
+    seen = set()
+    max_posts = max(1, int(max_posts))
 
-    seen_texts = set()
-    scroll_count = 0
-    analyzed_count = 0
-    posts_data = []
-    last_screenshot = None
-    last_dom_snapshot = ""
-    
-   
-   
-    smart_scroll_mobile(page)
-    smart_scroll_mobile(page)
-    smart_scroll_mobile(page)
-    smart_scroll_mobile(page)
-
-    
-    while analyzed_count < max_posts and scroll_count < max_scrolls:
-        
-        
-        
-        current_dom_snapshot = get_dom_snapshot(page)
-
-        #if current_dom_snapshot != last_dom_snapshot:
-        #    print("📄 تم تحميل محتوى جديد")
-        expanded = expand_all_facebook_posts(page)
-            #smart_scroll_mobile(page)
-            #page.wait_for_timeout(1500)
-            
-        #    last_dom_snapshot = current_dom_snapshot
-       # else:
-        #    print("🟡 نفس المحتوى السابق — لن ننفذ expand")
-
-
-
-        # ثم نأخذ screenshot كالمعتاد
-        screenshot_bytes = page.screenshot(full_page=False)
-
-
-
-
-      
-        if last_screenshot and screenshots_are_similar(screenshot_bytes, last_screenshot):
-            print("[Scroll Detection] Screenshot is similar. Skipping...")
-            scroll_count += 1
-            if 2 <= scroll_count <= 4:
-
-                # حفظ الموقع الحالي
-                
-
-                # الصعود لأعلى الصفحة
-                
-                scroll_up_and_return_smoothly(page)
-                #scroll_up_and_return_smoothly(page)
-                            
-            continue
-        else:
-            #print("[Scroll Detection] First screenshot.")
-            #input("111111111")
-            
-            scroll_count = 0
-            last_screenshot = screenshot_bytes
-            print(scroll_count)
-        masked_image = None  # تأكد من وجود المتغير قبل try
-
+    for scroll_index in range(max(1, int(max_scrolls))):
+        expand_all_facebook_posts(page)
+        cards = page.locator('[role="article"]')
+        candidates = []
         try:
-            mask = remove_background_with_rembg(screenshot_bytes)
-            masked_image = apply_mask_to_image(screenshot_bytes, mask)
-        except Exception as e:
-            print("Mask extraction failed:", e)
-            try:
-                image_stream = BytesIO(screenshot_bytes)
-                pil_image = Image.open(image_stream).convert("RGB")
-                masked_image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
-            except Exception as e2:
-                print("Fallback failed:", e2)
-                masked_image = None
+            count = cards.count()
+        except Exception:
+            count = 0
 
-        
-        if masked_image is not None:
-            _, buffer = cv2.imencode('.png', masked_image)
-            image_base64 = base64.b64encode(buffer).decode("utf-8")
+        if count:
+            for index in range(count):
+                card = cards.nth(index)
+                try:
+                    text = card.inner_text(timeout=3000).strip()
+                    if len(text) >= 30:
+                        candidates.append((card, text))
+                except Exception:
+                    continue
         else:
-            image_base64 = ""
+            try:
+                body = page.locator("body").inner_text(timeout=5000)
+                candidates.extend((None, block) for block in split_into_blocks(body) if len(block) >= 50)
+            except Exception as exc:
+                print(f"Could not read Facebook page text: {exc}")
 
+        found_new = False
+        for card, post_text in candidates:
+            key = " ".join(post_text.casefold().split())
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            found_new = True
 
-        all_texts, grouped_blocks = extract_text_with_boxes(masked_image)
-
-        #print("...all text...",all_texts)
-        #input(".....")
-
-        for i, full_text in enumerate(all_texts):
-
-            #print("...full text...",full_text)
-            #input("......")
+            best_keyword, best_score = None, 0.0
             for keyword in keywords:
-                similarity = compute_similarity(full_text.strip(), keyword.strip())
-                #print("...similarity....",similarity)
-                #input("......")
-                if similarity >= similarity_threshold:
+                keyword = keyword.strip()
+                if keyword:
+                    score = compute_similarity(keyword, post_text)
+                    if score > best_score:
+                        best_keyword, best_score = keyword, score
 
-                    
-                    
-                    matched_block = grouped_blocks[i]
-                    #print("✅ Bloc مطابق:", ' '.join(matched_block))
-                    #input(".....")
+            if best_keyword is None or best_score < similarity_threshold:
+                continue
 
-                   # ترميز الصورة إلى base64
-                    image_base64 = base64.b64encode(screenshot_bytes).decode("utf-8")
+            try:
+                shot = card.screenshot(timeout=5000) if card is not None else page.screenshot(full_page=False)
+            except Exception:
+                shot = page.screenshot(full_page=False)
+            results.append({
+                "text": post_text,
+                "matched_keyword": best_keyword,
+                "similarity": f"{best_score:.2f}",
+                "image_base64": base64.b64encode(shot).decode("utf-8"),
+                "page_url": page.url
+            })
+            if len(results) >= max_posts:
+                return sorted(results, key=lambda item: float(item["similarity"]), reverse=True)
 
-                    posts_data.append({
-                        "text": ' '.join(matched_block),
-                        "matched_keyword": keyword,
-                        "similarity": f"{similarity:.2f}",
-                        "image_base64": image_base64,
-                        "page_url": page.url
-                    })
+        if scroll_index > 0 and not found_new:
+            break
+        try:
+            page.evaluate("window.scrollBy(0, Math.max(500, window.innerHeight * 0.85))")
+            page.wait_for_timeout(1100)
+        except Exception:
+            break
 
-                    break
-
-
-        analyzed_count += 1
-        if analyzed_count < max_posts:
-            smart_scroll_mobile(page)
-            #page.wait_for_timeout(1500)
-
-
-
-
-
-    posts_data.sort(key=lambda x: x.get("similarity", 0), reverse=True)
-
-
-    return posts_data
-
-
-
+    return sorted(results, key=lambda item: float(item["similarity"]), reverse=True)
 
 
 def run_facebook_scraper(keywords, facebook_pages, max_posts, similarity_threshold, email):
     max_scrolls = 5
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--single-process",
+                "--disable-gpu"
+            ]
+        )
+
+
+
 
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36"
@@ -816,7 +526,7 @@ function openImage(src) {
     <title>Facebook Post Analyzer</title>
 </head>
 <body>
-    <h2>Analyze Facebook Posts   /  malaz janbeih-malazjanbeih@gmail.com-+96170647081  </h2>
+    <h2>Analyze Facebook Posts   /  malaz janbeih-malazjanbeih@gmail.com-+96178719611  </h2>
     <form method="POST">
         <label>User Email or ID:</label><br>
         <input type="text" name="email" required><br><br>
@@ -877,27 +587,16 @@ def home():
 
         email = request.form.get("email", "").strip()
 
-        results_holder = {}
-        thread = threading.Thread(
-            target=lambda: results_holder.update({
-                "results": run_facebook_scraper(keywords, links, max_posts, similarity_threshold, email)
-            })
-        )
+        results = run_facebook_scraper(keywords, links, max_posts, similarity_threshold, email)
 
-        thread.start()
-        thread.join()
-        results = results_holder.get("results", [])
         if not results:
             message = "❗ No matched keyword found."
         return render_template_string(HTML_TEMPLATE, results=results, message=message)
 
     return render_template_string(HTML_TEMPLATE)
 
-
-def open_browser():
-    time.sleep(1)
-    webbrowser.open("http://127.0.0.1:5000")
-
 if __name__ == "__main__":
-    threading.Thread(target=open_browser).start()
-    app.run(debug=False)
+    port = int(os.environ.get("PORT", 5000))  # Render sets PORT dynamically
+    app.run(host="0.0.0.0", port=port)
+
+
